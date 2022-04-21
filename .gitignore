@@ -1,3 +1,6 @@
 .idea/*
 venv
 .env
+main.py
+
+__pycache__

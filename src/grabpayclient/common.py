@@ -11,7 +11,6 @@ class Credentials(NamedTuple):
     client_id: str
     client_secret: str
     merchant_id: str
-    base_host: str
     redirect_url: str
 
 
