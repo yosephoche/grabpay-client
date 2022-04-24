@@ -1,7 +1,10 @@
 import json
 from collections import namedtuple
 from enum import Enum
+from urllib import parse
+from base64 import urlsafe_b64encode
 
+import random
 import requests
 import base64
 import hashlib
@@ -12,7 +15,7 @@ from datetime import datetime
 from http import HTTPStatus
 
 from src.grabpayclient.common import Credentials
-from src.grabpayclient.requests import InitChargeRequest
+from src.grabpayclient.requests import InitChargeRequest, WebUrlRequest
 from src.grabpayclient.helper import snake_to_camel, compute_hmac
 
 __all__ = ['GrabClient']
@@ -23,6 +26,9 @@ T = TypeVar('T')
 
 
 class GrabClient:
+    state = None
+    code_verifier = None
+
     def __init__(self, credentials: Credentials, sandbox_mode=False):
         self.credentials = credentials
         self.sandbox_mode = sandbox_mode
@@ -120,7 +126,45 @@ class GrabClient:
 
         return marshalled
 
-    def init_charge(self, req: InitChargeRequest) -> InitChargeResponse:
+    @staticmethod
+    def base64_url_encode(string):
+        return urlsafe_b64encode(string).replace(b'=', b'').replace(b'+', b'-').replace(b'/', b'_')
+
+    @staticmethod
+    def _random_string(length):
+        possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+        return ''.join(random.choice(possible) for _ in range(length))
+
+    def _generate_code_verifier(self, str_length):
+        string = self._random_string(str_length).encode()
+        return self.base64_url_encode(string)
+
+    def _generate_code_challenge(self, code_verifier):
+        string = hashlib.sha256(code_verifier).digest()
+        return self.base64_url_encode(string)
+
+    def get_authorize_link(self, init_charge: InitChargeResponse) -> str:
+        request_object = init_charge.request
+        scope = ' '.join(['openid', 'payment.one_time_charge'])
+        nonce = self._random_string(16)
+        self.state = self._random_string(7)
+
+        self.code_verifier = self._generate_code_verifier(64)
+
+        code_challenge = self._generate_code_challenge(self.code_verifier)
+        country_code = "SG"
+        currency = "SGD"
+
+        acr_values = "consent_ctx:countryCode=" + country_code + ",currency=" + currency
+
+        web_url_request = WebUrlRequest(self.credentials.client_id, scope, 'code', self.credentials.redirect_url,
+                                        nonce, self.state, 'S256', code_challenge, request_object, acr_values)
+
+        params = parse.urlencode(web_url_request.__dict__)
+        host = f'{self.base_url}/grabid/v1/oauth2/authorize?{params}'
+        return host
+
+    def init_charge(self, req: InitChargeRequest) -> str:
         """POST /grabpay/partner/v2/charge/init"""
         request_path = "/grabpay/partner/v2/charge/init"
         timestamp = datetime.utcnow()
@@ -128,5 +172,9 @@ class GrabClient:
         req_body = self._marshal_request(req.__dict__)
         hmac_signature = compute_hmac(self.credentials.partner_secret, request_path, req_body, timestamp)
 
-        return self._http_post_json(request_path, req.__dict__, InitChargeResponse, auth_key=hmac_signature)
+        response = self._http_post_json(request_path, req.__dict__, InitChargeResponse, auth_key=hmac_signature)
+
+        auth_link = self.get_authorize_link(response)
+
+        return auth_link
 

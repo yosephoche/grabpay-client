@@ -16,7 +16,6 @@ credentials = Credentials(
     client_id=os.getenv("GRAB_CLIENT_ID"),
     client_secret=os.getenv("GRAB_CLIENT_SECRET"),
     merchant_id=os.getenv("GRAB_MERCHANT_ID"),
-    base_host=os.getenv("GRAB_BASE_HOST"),
     redirect_url=os.getenv("GRAB_REDIRECT_URI"),
 )
 
@@ -41,5 +40,4 @@ req = InitChargeRequest(
 
 
 response = client.init_charge(req)
-print(response.partner_tx_id)
-print(response.request)
+print(response)
